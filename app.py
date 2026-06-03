@@ -1,21 +1,29 @@
 from flask import Flask, request, jsonify
-import sqlite3
+import psycopg2
+import os
 
 app = Flask(__name__)
 
-def init_db():
-    conn = sqlite3.connect("transactions.db")
-    cursor = conn.cursor()
+DATABASE_URL = os.environ["DATABASE_URL"]
 
-    cursor.execute("""
+def get_connection():
+    return psycopg2.connect(DATABASE_URL)
+
+def init_db():
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
     CREATE TABLE IF NOT EXISTS transactions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         merchant TEXT,
-        amount REAL
+        amount NUMERIC,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """)
 
     conn.commit()
+    cur.close()
     conn.close()
 
 init_db()
@@ -32,15 +40,19 @@ def transaction():
     merchant = data.get("merchant")
     amount = data.get("amount")
 
-    conn = sqlite3.connect("transactions.db")
-    cursor = conn.cursor()
+    conn = get_connection()
+    cur = conn.cursor()
 
-    cursor.execute(
-        "INSERT INTO transactions (merchant, amount) VALUES (?, ?)",
+    cur.execute(
+        """
+        INSERT INTO transactions (merchant, amount)
+        VALUES (%s, %s)
+        """,
         (merchant, amount)
     )
 
     conn.commit()
+    cur.close()
     conn.close()
 
     return jsonify({
@@ -50,15 +62,28 @@ def transaction():
 @app.route("/transactions")
 def transactions():
 
-    conn = sqlite3.connect("transactions.db")
-    cursor = conn.cursor()
+    conn = get_connection()
+    cur = conn.cursor()
 
-    cursor.execute(
-        "SELECT id, merchant, amount FROM transactions"
-    )
+    cur.execute("""
+        SELECT id, merchant, amount, created_at
+        FROM transactions
+        ORDER BY id DESC
+    """)
 
-    rows = cursor.fetchall()
+    rows = cur.fetchall()
 
+    cur.close()
     conn.close()
 
-    return jsonify(rows)
+    result = []
+
+    for row in rows:
+        result.append({
+            "id": row[0],
+            "merchant": row[1],
+            "amount": float(row[2]),
+            "created_at": str(row[3])
+        })
+
+    return jsonify(result)
